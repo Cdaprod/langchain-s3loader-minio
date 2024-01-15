@@ -1392,3 +1392,384 @@ In these schema classes:
 - `MetaData` is ideal for storing and searching through metadata of various types of content, enhancing the ability to find data based on descriptive attributes.
 
 The `embedding` fields in these schemas are crucial as they store vector representations of the data, allowing for advanced semantic search capabilities in Weaviate. This setup enables your application to handle a wide range of data types effectively, providing rich and context-aware search functionalities.
+
+---
+
+# Wrapping up MinIO => Weavaite Ingestion with Langchain Json Parser
+
+Certainly! To complete your source code with the integration of LangChain concepts, focusing on data ingestion, chaining, transformation, and indexing, let's revise the entire script. The revised code will demonstrate how to effectively handle data from MinIO, process it through LangChain chains, and then index it into Weaviate.
+
+Here's the completed source code:
+
+```python
+import os
+import json
+import openai
+from langchain.llms.openai import OpenAI
+from langchain.chains import Chain
+from langchain.output_parsers import JSONParser
+from langchain.tools import DuckDuckGoSearchRun, GoogleSerperAPIWrapper, WikipediaQueryRun, YouTubeSearchTool
+from langchain.agents import Tool, initialize_agent
+from langchain.servables import FastAPIWrapper
+from langchain.runnables import Runnable
+from minio import Minio
+from weaviate.client import Client
+
+# Load OpenAI API Key
+openai.api_key = os.getenv("OPENAI_API_KEY")
+llm = OpenAI(model_name="gpt-3.5-turbo")
+
+# Initialize MinIO and Weaviate clients
+minio_client = Minio("MINIO_ENDPOINT", access_key="MINIO_ACCESS_KEY", secret_key="MINIO_SECRET_KEY", secure=True)
+weaviate_client = Client(url="WEAVIATE_ENDPOINT")
+
+# Initialize LangChain Tools
+ddg_search = DuckDuckGoSearchRun()
+google_search = GoogleSerperAPIWrapper()
+wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
+youtube = YouTubeSearchTool()
+
+tools = [
+    Tool(name="DuckDuckGo Search", func=ddg_search.run, description="DuckDuckGo browsing"),
+    Tool(name="Google Search", func=google_search.run, description="Google browsing"),
+    Tool(name="Wikipedia Search", func=wikipedia.run, description="Wikipedia browsing"),
+    Tool(name="YouTube Search", func=youtube.run, description="YouTube browsing")
+]
+
+# Initialize LangChain Agent
+agent = initialize_agent(tools, llm, agent="zero-shot-react-description")
+
+# Define Weaviate schema classes
+text_data_schema = {
+    "class": "TextData",
+    "properties": [
+        {"name": "title", "dataType": ["string"], "indexInverted": True},
+        {"name": "content", "dataType": ["text"], "indexInverted": True}
+    ]
+}
+
+image_data_schema = {
+    "class": "ImageData",
+    "properties": [
+        {"name": "image_name", "dataType": ["string"], "indexInverted": True},
+        {"name": "url", "dataType": ["string"], "indexInverted": True}
+    ]
+}
+
+# Create Weaviate classes
+weaviate_client.schema.create_class(text_data_schema)
+weaviate_client.schema.create_class(image_data_schema)
+
+# Initialize LangChain JSON Parser
+json_parser = JSONParser()
+
+# Define the Data Processing Chain
+def data_processing_chain(bucket_name):
+    return Chain([
+        lambda _: minio_client.get_object(bucket_name, _).read(),
+        transform_data_for_weaviate,
+        lambda transformed_data: weaviate_client.data_object.create(
+            data_object=transformed_data, 
+            class_name="YourWeaviateClassName"
+        )
+    ])
+
+# Define Transformation Functions
+def transform_for_bucket1(data):
+    # Custom logic for transforming text data for bucket1
+    return json_parser.parse(data)
+
+def transform_for_bucket2(data):
+    # Custom logic for transforming image data for bucket2
+    return json_parser.parse(data)
+
+def transform_data_for_weaviate(minio_data, bucket_name):
+    transformation_function = {
+        "bucket1": transform_for_bucket1,
+        "bucket2": transform_for_bucket2
+    }.get(bucket_name, lambda x: x)
+
+    return transformation_function(minio_data)
+
+# Define LangChain Runnable for processing data
+class ProcessDataRunnable(Runnable):
+    def run(self, bucket_name):
+        process_chain = data_processing_chain(bucket_name)
+        objects = minio_client.list_objects(bucket_name, recursive=True)
+        for obj in objects:
+            process_chain(obj.object_name)
+        return "Data processed and indexed"
+
+# Set up LangServe
+app = FastAPIWrapper()
+app.add_runnable("/process_data", ProcessDataRunnable())
+
+# Run LangServe
+if __name__ == "__main__":
+    app.run()
+```
+
+In this code:
+
+- The `data_processing_chain` function orchestrates the sequence of operations for each data item from MinIO.
+- The `transform_for_bucket1` and `transform_for_bucket2` functions are placeholders for your custom logic to transform text and image data respectively. They use the LangChain JSON parser for demonstration, but you should replace this logic with your specific transformation requirements.
+- The `ProcessDataRunnable` class uses the `data_processing_chain` for each object in the MinIO bucket, ensuring that data is processed and indexed in Weaviate in an ordered and efficient manner.
+
+This completed source code aligns with LangChain's approach to data handling, offering a structured and scalable way to process and manage data in your application. Remember to test and adjust the transformation logic as per your actual data format and requirements.
+
+---
+
+# Talking about custom objects again - Pydantic Models, Transformations, Mapping, and Implementation in `ProcessDataRunnable`
+
+Certainly! Let's define each custom object type as a Pydantic model and then write the transformation logic to map data to these models. Each model will have properties specific to its data type.
+
+### 1. Define Pydantic Models for Each Custom Object Type:
+
+```python
+from pydantic import BaseModel, HttpUrl, Field
+from typing import List, Optional
+
+class TextData(BaseModel):
+    title: str
+    content: str
+    embedding: List[float]
+
+class ImageData(BaseModel):
+    image_name: str
+    url: HttpUrl
+    description: Optional[str]
+    embedding: List[float]
+
+class AudioData(BaseModel):
+    audio_name: str
+    url: HttpUrl
+    transcription: Optional[str]
+    embedding: List[float]
+
+class VideoData(BaseModel):
+    video_name: str
+    url: HttpUrl
+    transcription: Optional[str]
+    embedding: List[float]
+
+class CodeData(BaseModel):
+    code_snippet: str
+    language: str
+    description: Optional[str]
+    embedding: List[float]
+
+class TableData(BaseModel):
+    table_title: str
+    table_content: str  # JSON or structured text
+    embedding: List[float]
+
+class MetaData(BaseModel):
+    meta_title: str
+    meta_description: str
+    meta_keywords: List[str]
+    embedding: List[float]
+```
+
+### 2. Write Transformation Mapping Logic:
+
+Assuming each data type has a specific way to be transformed into the respective Pydantic model, let's create a function to handle this:
+
+```python
+def transform_data(data, data_type: str):
+    if data_type == 'text':
+        # Logic to transform data to TextData
+        transformed_data = TextData(**data)
+    elif data_type == 'image':
+        # Logic to transform data to ImageData
+        transformed_data = ImageData(**data)
+    elif data_type == 'audio':
+        # Logic to transform data to AudioData
+        transformed_data = AudioData(**data)
+    elif data_type == 'video':
+        # Logic to transform data to VideoData
+        transformed_data = VideoData(**data)
+    elif data_type == 'code':
+        # Logic to transform data to CodeData
+        transformed_data = CodeData(**data)
+    elif data_type == 'table':
+        # Logic to transform data to TableData
+        transformed_data = TableData(**data)
+    elif data_type == 'meta':
+        # Logic to transform data to MetaData
+        transformed_data = MetaData(**data)
+    else:
+        raise ValueError("Unsupported data type")
+
+    # Generate embedding for the data
+    # embedding = generate_embedding_for_data(transformed_data)
+    # transformed_data.embedding = embedding
+
+    return transformed_data
+```
+
+In this logic:
+
+- Each data type is transformed into its respective Pydantic model.
+- You would need to fill in the actual transformation logic and the embedding generation specific to each data type.
+- The `**data` syntax is used for simplicity, assuming `data` is a dictionary matching the model fields. Adjustments might be necessary based on the actual data format.
+
+This setup offers a structured and scalable approach to handle various data types, transforming them into well-defined models for further processing or indexing.
+
+To integrate the transformation logic using the Pydantic models into your existing code, you'll need a function that determines the type of data in each MinIO bucket and then applies the correct transformation. This function should fit seamlessly into your `ProcessDataRunnable` class. Here's how you can do it:
+
+### 1. Define a Function to Identify Data Type:
+
+Assuming you have a way to determine the data type (perhaps based on file extension, MIME type, content, or metadata):
+
+```python
+def identify_data_type(file_name):
+    # Logic to determine the data type based on file_name
+    # For example, using file extensions:
+    if file_name.endswith('.txt'):
+        return 'text'
+    elif file_name.endswith('.jpg') or file_name.endswith('.png'):
+        return 'image'
+    # ... and so on for other data types
+    else:
+        return 'unknown'
+```
+
+### 2. Update the `ProcessDataRunnable` Class:
+
+Incorporate the data type identification and transformation logic:
+
+```python
+class ProcessDataRunnable(Runnable):
+    def run(self, bucket_name):
+        objects = minio_client.list_objects(bucket_name, recursive=True)
+        for obj in objects:
+            file_name = obj.object_name
+            data = minio_client.get_object(bucket_name, file_name).read()
+
+            # Identify data type
+            data_type = identify_data_type(file_name)
+
+            # Prepare data for transformation (Example: convert to a dict)
+            # This is a placeholder. Adjust according to your actual data structure.
+            data_dict = prepare_data_for_transformation(data)
+
+            # Transform data based on its type
+            try:
+                transformed_data = transform_data(data_dict, data_type)
+                # Here, you can further process or index the transformed_data
+            except ValueError as e:
+                print(f"Error processing {file_name}: {e}")
+
+        return "Data processed and indexed"
+```
+
+### 3. Additional Considerations:
+
+- Ensure the `prepare_data_for_transformation` function correctly formats your raw data into a dictionary matching the Pydantic model structure. This might involve parsing, decoding, or restructuring the data.
+- The embedding generation part is commented out in the `transform_data` function. You'll need to implement an appropriate method for generating embeddings based on your specific requirements and data types.
+
+With this setup, your application can dynamically handle various types of data, transforming them appropriately based on their determined type. This approach provides flexibility and scalability for processing diverse data from MinIO and indexing it into Weaviate.
+
+---
+
+# Put it together, and what do ya got?
+
+To create a ready-to-go Python script that integrates LangChain with MinIO and Weaviate, utilizing the custom object types and transformation logic, we will build the script step by step. This script will include all necessary components, from initializing clients to defining models and processing data.
+
+1. **Imports and Initializations**:
+   - Import necessary libraries and initialize clients for OpenAI, MinIO, and Weaviate.
+
+2. **Define Pydantic Models**:
+   - Define models for `TextData`, `ImageData`, etc.
+
+3. **Transformation Functions**:
+   - Implement functions to transform raw data into Pydantic model instances.
+
+4. **Data Processing Logic**:
+   - Develop the logic to process data from MinIO buckets, transform it, and index it in Weaviate.
+
+### Complete Script:
+
+```python
+import os
+import json
+from typing import List
+from pydantic import BaseModel, HttpUrl
+from minio import Minio
+from weaviate.client import Client
+from langchain.llms.openai import OpenAI
+from langchain.servables import FastAPIWrapper
+from langchain.runnables import Runnable
+
+# Initialize OpenAI
+openai.api_key = os.getenv("OPENAI_API_KEY")
+llm = OpenAI(model_name="gpt-3.5-turbo")
+
+# Initialize MinIO
+minio_client = Minio("MINIO_ENDPOINT", access_key="MINIO_ACCESS_KEY", secret_key="MINIO_SECRET_KEY", secure=True)
+
+# Initialize Weaviate
+weaviate_client = Client(url="WEAVIATE_ENDPOINT")
+
+# Define Pydantic Models
+class TextData(BaseModel):
+    title: str
+    content: str
+    embedding: List[float]
+
+class ImageData(BaseModel):
+    image_name: str
+    url: HttpUrl
+    description: str
+    embedding: List[float]
+
+# Define additional models for AudioData, VideoData, CodeData, TableData, MetaData as needed
+
+# Transformation Functions
+def transform_text_data(data):
+    # Placeholder logic for transforming to TextData
+    return TextData(title="Example Title", content="Example Content", embedding=[0.0] * 128).dict()
+
+def transform_image_data(data):
+    # Placeholder logic for transforming to ImageData
+    return ImageData(image_name="Example Image", url="http://example.com/image.jpg", description="Example Description", embedding=[0.0] * 128).dict()
+
+# Add additional transformation functions for other data types
+
+# Data Processing Logic
+class ProcessDataRunnable(Runnable):
+    def run(self, bucket_name):
+        objects = minio_client.list_objects(bucket_name, recursive=True)
+        for obj in objects:
+            data = minio_client.get_object(bucket_name, obj.object_name).read()
+            # Placeholder for identifying data type
+            data_type = 'text'  # This should be dynamic based on actual data
+            if data_type == 'text':
+                transformed_data = transform_text_data(data)
+            elif data_type == 'image':
+                transformed_data = transform_image_data(data)
+            # Add additional data type checks
+            weaviate_client.data_object.create(data_object=transformed_data, class_name="YourWeaviateClassName")
+        return "Data processed and indexed"
+
+# Set up FastAPI Wrapper
+app = FastAPIWrapper()
+app.add_runnable("/process_data", ProcessDataRunnable())
+
+# Run the server
+if __name__ == "__main__":
+    app.run()
+```
+
+### Points to Note:
+
+- This script is a template and needs further refinement based on your specific requirements.
+- You need to define the logic to identify the data type (`identify_data_type` function) and generate embeddings (`generate_embedding` function) according to your application's needs.
+- The `transform_text_data` and `transform_image_data` functions are placeholders. Replace them with your actual transformation logic.
+- Additional models and transformation functions for `AudioData`, `VideoData`, `CodeData`, `TableData`, and `MetaData` need to be added as per your requirement.
+- The actual class names for Weaviate indexing (`YourWeaviateClassName`) should match your schema definitions in Weaviate.
+- Error handling and data validation are crucial for robustness, especially when dealing with diverse data types and sources.
+
+This script sets up a basic structure for processing and indexing different types of data from MinIO into Weaviate. You'll need to adapt and extend it to fit the specifics of your data and the requirements of your application.
+
+## Bipity Bopity Boo!
