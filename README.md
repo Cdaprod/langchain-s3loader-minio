@@ -1352,6 +1352,101 @@ For more detailed information on the retrievers available in LangChain and their
 
 ---
 
+# Tips & Techniques
+
+To build an application integrating LangChain with MinIO and Weaviate, you can draw inspiration from various examples and demonstrations available online. These include setting up Weaviate as a vector database for semantic search, utilizing LangChain for LLM augmentations and retrievals, and harnessing MinIO for efficient data storage.
+
+For instance, one approach involves setting up Weaviate for similarity searches with scoring. This involves initializing a Weaviate client, configuring the vector store, and adding documents for retrieval. You can perform hybrid searches, combining keyword and vector-based search techniques, to retrieve relevant documents based on their semantic context [oai_citation:1,Weaviate | ️ Langchain](https://python.langchain.com/docs/integrations/vectorstores/weaviate) [oai_citation:2,Weaviate Hybrid Search | ️ Langchain](https://python.langchain.com/docs/integrations/retrievers/weaviate-hybrid).
+
+In LangChain, you can use sequential chains to combine multiple LLM inferences in a structured manner. This allows for step-by-step processing of information, enhancing the accuracy and relevance of the output. Techniques like `CombineDocuments` in LangChain help in managing large inputs beyond the token length limits of LLMs, using methods like Stuffing, Map Reduce, Refine, and Map Rerank [oai_citation:3,Combining LangChain and Weaviate | Weaviate - Vector Database](https://weaviate.io/blog/combining-langchain-and-weaviate).
+
+Additionally, integrating vector-based similarity searches with LangChain can be achieved using different vector stores like Weaviate and OpenSearch. This setup allows for similarity searches against these databases, using OpenAI's GPT models for embeddings and search queries. You can execute similarity searches and compare the results from different vector stores, observing how they rank and retrieve relevant documents [oai_citation:4,Vector search using Langchain, Weaviate and OpenSearch - Luminis](https://www.luminis.eu/blog/vector-search-using-langchain-weaviate-and-opensearch/).
+
+These examples provide a foundation for developing your application. You can adapt and extend these techniques based on your specific requirements, integrating LangChain, Weaviate, and MinIO to create a powerful, semantically aware, and efficient system.
+
+---
+
+Ok write it out, include the same structure as I’ve been providing 
+
+---
+
+# Including relevant functionalities like similarity searches, sequential chains, and document combination
+
+Based on the structure and examples you've been interested in, here's how you can structure and write out the Python script to integrate LangChain with MinIO and Weaviate, including relevant functionalities like similarity searches, sequential chains, and document combination:
+
+```python
+# Import necessary libraries
+import os
+import weaviate
+from minio import Minio
+from langchain.llms import OpenAI
+from langchain.chains import SequentialChain, CombineDocuments
+from langchain.retrievers import WeaviateRetriever
+from langchain.servables import FastAPIWrapper
+from langchain.runnables import Runnable
+from langchain.schema import Document
+
+# Initialize MinIO Client
+minio_client = Minio("MINIO_ENDPOINT",
+                     access_key="MINIO_ACCESS_KEY",
+                     secret_key="MINIO_SECRET_KEY",
+                     secure=True)
+
+# Initialize Weaviate Client
+weaviate_client = weaviate.Client(url="WEAVIATE_ENDPOINT",
+                                  auth_client_secret=weaviate.AuthApiKey("WEAVIATE_API_KEY"))
+
+# Initialize LangChain LLM
+llm = OpenAI(api_key="YOUR_OPENAI_API_KEY")
+
+# Define Weaviate schema classes
+text_data_schema = {
+    # ... Define the schema for TextData class
+}
+
+# Create Weaviate classes
+weaviate_client.schema.create_class(text_data_schema)
+
+# Define a LangChain SequentialChain
+sequential_chain = SequentialChain([llm])
+
+# Define a LangChain CombineDocuments Chain
+combine_documents_chain = CombineDocuments(llm)
+
+# Define a LangChain Weaviate Retriever
+weaviate_retriever = WeaviateRetriever(weaviate_client)
+
+# Define LangChain Runnable for processing and indexing data
+class ProcessAndIndexDataRunnable(Runnable):
+    def run(self, bucket_name):
+        objects = minio_client.list_objects(bucket_name, recursive=True)
+        for obj in objects:
+            # Fetch data from MinIO and process it
+            data = minio_client.get_object(bucket_name, obj.object_name).read()
+            processed_data = sequential_chain.run(data.decode('utf-8'))
+            # Index processed data in Weaviate
+            weaviate_client.data_object.create(data_object={"content": processed_data}, class_name="TextData")
+        return "Data processed and indexed"
+
+# Set up LangServe
+app = FastAPIWrapper()
+app.add_runnable("/process_and_index_data", ProcessAndIndexDataRunnable())
+
+# Run LangServe
+if __name__ == "__main__":
+    app.run()
+```
+
+In this script:
+- Replace `"MINIO_ENDPOINT"`, `"MINIO_ACCESS_KEY"`, `"MINIO_SECRET_KEY"`, `"WEAVIATE_ENDPOINT"`, and `"YOUR_OPENAI_API_KEY"` with your actual configuration details.
+- Define the `text_data_schema` based on the data structure you plan to store in Weaviate.
+- The `ProcessAndIndexDataRunnable` class processes data fetched from MinIO using a sequential chain in LangChain and then indexes this data in Weaviate.
+- The script includes a FastAPI wrapper to create an API endpoint for the data processing and indexing functionality.
+
+This script provides a foundational framework for your application. You can extend it to include additional features like similarity searches in Weaviate, advanced document combination techniques in LangChain, and more complex data transformation logics as per your specific application needs.
+
+---
+
 # Classes and Functions
 
 Here's a detailed table of classes and functions for your application that integrates LangChain with MinIO and Weaviate, designed to handle various aspects and approaches:
@@ -1392,3 +1487,118 @@ In these schema classes:
 - `MetaData` is ideal for storing and searching through metadata of various types of content, enhancing the ability to find data based on descriptive attributes.
 
 The `embedding` fields in these schemas are crucial as they store vector representations of the data, allowing for advanced semantic search capabilities in Weaviate. This setup enables your application to handle a wide range of data types effectively, providing rich and context-aware search functionalities.
+
+---
+
+
+
+---
+
+# Writing the code with Pydantic Models
+
+For your application's code structure, incorporating "Objects" and "Function Classes" can be organized effectively using Pydantic's BaseModel for enhanced structure and validation. Here's a guideline for including them in your code:
+
+1. **Objects**:
+   - Objects are instances of classes and data structures. They're typically defined after importing the necessary libraries and modules and before or during the initialization of main components.
+   - For instance, in a LangChain application, you may have objects representing configurations for MinIO, Weaviate, and LangChain settings. These can be organized as Pydantic models for better structure and validation.
+
+2. **Function Classes**:
+   - Function classes are custom classes that encapsulate specific functionalities within your application. These are usually written after setting up the main application components like OpenAI, MinIO, and Weaviate clients.
+   - In your application, function classes like `ProcessDataRunnable` or any other custom runnable classes can be defined using Pydantic's BaseModel to ensure consistent data handling and validation.
+
+3. **Using Pydantic BaseModels**:
+   - Pydantic BaseModels are used to define data models with type validations. When you create objects or function classes, you can define their structure using Pydantic models.
+   - For example, if you have a function class that processes data from MinIO and indexes it into Weaviate, you can define its input and output data structures as Pydantic models.
+
+Here's a basic example to illustrate these points:
+
+```python
+from pydantic import BaseModel
+from langchain.llms import OpenAI
+from langchain.retrievers import ElasticsearchRetriever, WeaviateRetriever, LocalRetriever
+from minio import Minio
+from weaviate.client import Client
+
+# Define Pydantic models for configuration settings
+class MinIOConfig(BaseModel):
+    endpoint: str
+    access_key: str
+    secret_key: str
+    secure: bool
+
+class WeaviateConfig(BaseModel):
+    url: str
+    api_key: str
+
+# Initialize your configurations
+minio_config = MinIOConfig(
+    endpoint="MINIO_ENDPOINT",
+    access_key="MINIO_ACCESS_KEY",
+    secret_key="MINIO_SECRET_KEY",
+    secure=True
+)
+
+weaviate_config = WeaviateConfig(
+    url="WEAVIATE_ENDPOINT",
+    api_key="WEAVIATE_API_KEY"
+)
+
+# Initialize MinIO and Weaviate clients using Pydantic models
+minio_client = Minio(
+    minio_config.endpoint,
+    access_key=minio_config.access_key,
+    secret_key=minio_config.secret_key,
+    secure=minio_config.secure
+)
+
+weaviate_client = Client(
+    url=weaviate_config.url,
+    auth_client_secret=weaviate_config.api_key
+)
+
+# [Initialize OpenAI, LangChain Tools, and LangChain Retrievers as previously defined]
+
+# Define Function Classes with Pydantic BaseModels
+class ProcessDataRequest(BaseModel):
+    bucket_name: str
+    object_name: str
+
+class ProcessDataResponse(BaseModel):
+    message: str
+
+class ProcessDataRunnable(Runnable):
+    def run(self, request: ProcessDataRequest) -> ProcessDataResponse:
+        # [Implement the logic to process and index data]
+        return ProcessDataResponse(message="Data processed and indexed")
+
+# [Existing FastAPI Setup and Runnable setup]
+# [Existing code to run LangServe]
+```
+
+---
+
+# Keep in mind when writing code
+
+It seems like you're ready to proceed with the development of your application that integrates LangChain with MinIO and Weaviate, using Python and Pydantic models. Here are some key steps and best practices to keep in mind as you move forward with the development:
+
+1. **Code Organization and Structure**:
+   - Keep your code well-organized and modular. This not only makes it easier to manage but also simplifies debugging and maintenance.
+   - Group related functionalities into classes and modules. For instance, all MinIO-related operations can be encapsulated in a specific module or class.
+
+2. **Implementing Pydantic Models**:
+   - Use Pydantic models to enforce type checking and validation. This adds a layer of robustness to your application by ensuring that data conforms to expected formats.
+   - Define clear models for your inputs and outputs, especially
+   - For each API endpoint or data processing function, define Pydantic models that clearly describe the structure of input data and the format of the response. This ensures consistency in how data is received and sent by your application.
+
+3. **Developing Custom Function Classes**:
+   - For each core functionality (like processing and indexing data), create dedicated classes or functions. This modular approach makes the codebase scalable and easier to modify.
+   - Implement error handling within these classes to manage and log exceptions, ensuring your application can gracefully handle unexpected scenarios.
+
+4. **Integration Testing**:
+   - Regularly test the integration points between MinIO, Weaviate, and LangChain. This helps in identifying and resolving issues early in development.
+   - Ensure the correct operation of your application by testing how MinIO, Weaviate, and LangChain work together. This involves testing the flow of data from MinIO to the processing logic in LangChain and finally to the indexing and retrieval in Weaviate.
+   - Use unit tests and integration tests to cover various scenarios and edge cases. Tools like `pytest` can be helpful for writing and managing these tests.
+
+5. **API Development with FastAPI**:
+   - Utilize FastAPI to create efficient, asynchronous API endpoints for your application. FastAPI's automatic request validation using Pydantic models can greatly simplify your API development.
+   - Ensure that each endpoint is well-documented, taking advantage of FastAPI's built-in support 
